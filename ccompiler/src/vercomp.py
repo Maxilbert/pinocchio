@@ -3,7 +3,7 @@
 import pickle
 import json
 import argparse
-import sys
+import sys, resource
 import types
 import subprocess
 import os
@@ -28,7 +28,8 @@ from Struct import *
 import BitWidth
 from Collapser import Collapser
 
-sys.setrecursionlimit(10000)
+resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+sys.setrecursionlimit(10**6)
 
 class Void(): pass
 
@@ -93,6 +94,8 @@ class TypeState:
 #		self.result = self.collapser.collapse_tree(self.out_expr)
 
 class Vercomp:
+
+	
 	def __init__(self, filename, args, timing):
 		self.cpp_arg = args.cpp_arg
 		self.timing = timing
@@ -130,8 +133,9 @@ class Vercomp:
 
 		parser = pycparser.CParser()
 		ast = parser.parse(cfile)
-		self.root_ast = ast
+		print "I am not stucking at parsering"
 
+		self.root_ast = ast
 		self.output = self.create_expression()
 
 	def gcc_preprocess(self, filename, cpp_arg):
@@ -155,6 +159,7 @@ class Vercomp:
 		print "cmd_list %s" % (" ".join(cmd_list))
 		sp = subprocess.Popen(cmd_list)
 		sp.wait()
+		print "I am not stucking at gcc compiling"
 		return tmpname
 
 	def preprocess_line(self, line):
@@ -855,8 +860,12 @@ class Vercomp:
 			# So, we assume that the only way to limit the loop is to
 			# use the _unroll hint.
 			return self.unroll_dynamic_loop(cond, body_compound, symtab)
-
+	
+	transform_counter = 0
 	def transform_compound(self, body, outer_symtab, func_scope=False):
+		self.transform_counter += 1
+		if ( (self.transform_counter % 10000) == 0):
+			print "tranform compound has runned %d times" %self.transform_counter
 		# func_scope says that it's okay to return a value
 		# from (the end of) this compound block.
 		# returns Symtab
@@ -864,6 +873,7 @@ class Vercomp:
 		#print "compound %s is %s" % (body.__class__, ast_show(body))
 		assert(isinstance(body, c_ast.Compound))
 		children = body.children()
+		#print "The length of children is %d" %len(children)
 		for stmt_idx in range(len(children)):
 			(name, statement) = children[stmt_idx]
 			return_allowed = (func_scope and stmt_idx == len(children)-1)
@@ -977,7 +987,7 @@ class Vercomp:
 			assert(input_storage_ref.idx==0)
 			input_list = []
 			for idx in range(input_storage_ref.type.sizeof()):
-				#print "create_input_keys(%s)[%d]" % (class_.__name__, idx)
+				print "create_input_keys(%s)[%d]" % (class_.__name__, idx)
 				sk = StorageKey(input_storage_ref.storage, idx)
 				input = self.dfg(class_, sk)
 				input_list.append(input)
@@ -990,9 +1000,10 @@ class Vercomp:
 			self.nizk_inputs = create_input_keys(NIZK_ARG_IDX, NIZKInput)
 
 		#print "root_funccall symtab: %s" % symtab
+		print "root funccall is running..."
 		result_symtab = self.transform_compound(
 			func_def.body, symtab, func_scope=True)
-		#print "root_funccall result_symtab:"
+		print "root_funccall result_symtab:"
 		#result_symtab.dbg_dump_path()
 			
 		out_sym = Symbol(param_decls[OUTPUT_ARG_IDX].name)
@@ -1001,7 +1012,7 @@ class Vercomp:
 
 	def create_expression(self):
 		global_symtab = self.create_global_symtab()
-
+		print "Create expression is running ... 1"
 #		print "Setting up inputs; symtab: %s" % global_symtab
 #		# mark all input storage locations as non-constant inputs
 #		for name in self.decode_label_hacks("_input"):
@@ -1013,22 +1024,28 @@ class Vercomp:
 #				print "assigning %s" % sk
 #				global_symtab.assign(sk, Input(sk))
 		outsource_func = self.find_func("outsource")
+		print "Create expression is running ... 2"
 		if (self.verbose):
 			print "global_symtab: %s" % global_symtab
 		self.timing.phase("root_funccall")
+		print "Create expression is running ... 3"
 		out_state = self.root_funccall(global_symtab)
 		output_storage_ref = out_state.expr
+		print "Create expression is running ... 4"
 
 		# memoizer for collapsing exprs to minimal expressions (with
 		# no expressions purely of constant terms).
 		collapser = ExprCollapser(self.expr_evaluator)
+		print "Create expression is running ... 5"
 
 		self.timing.phase("collapse_output")
 		if (self.progress):
 			print "collapsing output"
+		print "Create expression is running ... 6"
+
 		output = []
 		for idx in range(output_storage_ref.type.sizeof()):
-			#print "working on output %d" % idx
+			print "working on output %d" % idx
 			self.timing.phase("collapse_output %d" % idx)
 			sk = StorageKey(output_storage_ref.storage, idx)
 			try:
@@ -1166,6 +1183,8 @@ def main(argv):
 		timing.phase("emit_arith")
 		if (vercomp.progress):
 			print "Compilation complete; emitting arith."
+			print "bit width:"
+			print vercomp.bit_width.get_width()
 		ArithFactory(args.arith_file, vercomp.inputs, vercomp.nizk_inputs, vercomp.output, vercomp.bit_width)
 
 	if (args.bool_file!=None):
@@ -1183,4 +1202,3 @@ def testcase():
 if (__name__=="__main__"):
 	main(sys.argv[1:])
 	#cProfile.run('main()')
-
